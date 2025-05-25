@@ -1568,7 +1568,7 @@ border-radius: 0px;
 
 <h1 class="title toc-ignore">Code BA: AI Got a Feeling</h1>
 <h4 class="author">Zoe Alter</h4>
-<h4 class="date">18 Mai, 2025</h4>
+<h4 class="date">25 Mai, 2025</h4>
 
 </div>
 
@@ -2780,8 +2780,8 @@ stargazer(
   out = &quot;riskratios.html&quot;
 </code></pre>
 </div>
-<div id="spearmans-rank-and-heatmap" class="section level4">
-<h4>Spearmans rank and heatmap</h4>
+<div id="spearmans-and-pearsons-correlation" class="section level4">
+<h4>Spearmans and Pearsons Correlation</h4>
 <pre class="spearmans"><code>library(ggplot2)
 library(reshape2)
 # only features in final model
@@ -2794,7 +2794,7 @@ predictors &lt;- c(&quot;CERF.A1&quot; ,
 
 # calculate spearmans for all combinations
 correlation_matrix &lt;- cor(train[predictors], 
-                          method = &quot;spearman&quot;)
+                          method = &quot;spearman&quot;) #replaced with &quot;pearson&quot; for person correlation
 
 # identify correlations
 high_correlations &lt;- which(abs(correlation_matrix) &gt; 0.1 &amp; 
@@ -2944,19 +2944,91 @@ ggplot(conf_data, aes(Prediction, Reference, fill=Freq)) +
 <h3>Step four: SemEval</h3>
 <p>Step one and two were repeated (only adapted for a .jsonl input,
 instead of a.txt file), and then retrained on a train set and applied to
-a test set, as in step three. ##Step five: profiling</p>
+a test set, as in step three.</p>
 </div>
 <div id="step-five-profiling" class="section level3">
 <h3>Step five: Profiling</h3>
+<div id="creating-the-profiles" class="section level4">
+<h4>Creating the profiles</h4>
 <pre class="profiling"><code>#data
-sem &lt;- read.csv(&quot;~/Data/Semeval/SUBtrai1_cleaned.csv&quot;)
+sem &lt;- read.csv(&quot;~/Data/Semeval/SUBtrain1_cleaned.csv&quot;)
 mine &lt;- read.csv(&quot;C:/U~/Data/DATENSATZ_cleaned.csv&quot;)
 
 #creation of boxplots for profiles, data input and feature changed based on need
 boxplot(sem$CERF.A1~sem$author,
         xlab = &quot;Author&quot;, ylab = &quot;CEFR A1&quot;, 
         col=(c(&quot;gray&quot;, &quot;lightgreen&quot;,&quot;blue&quot;,&quot;lightblue&quot;,&quot;red&quot;, &quot;orange&quot;  )))
-</code></pre>
+        
+#comparing the datasets
+#data
+sem &lt;- read.csv(&quot;C:/~/Data/Semeval/SUBtrain1_raw.csv&quot;)
+
+mine &lt;- read.csv(&quot;C:/~/Data/DATENSATZ_cleaned.csv&quot;)
+
+# add source
+Sem_G &lt;- df[sem$author == &quot;GPT&quot;, ] %&gt;%
+  mutate(Source = &quot;SemEval&quot;)
+
+mine_G &lt;- df[mine$author == &quot;GPT&quot;, ] %&gt;%
+  mutate(Source = &quot;Curated&quot;)
+  
+combined_data &lt;- bind_rows(Sem_G, mine_G)
+
+#creating boxplot, compare needed data
+boxplot(combined_data$Ratios.ratio_pronouns~combined_data$Source,
+        xlab = &quot;Corpus&quot;, ylab = &quot;Pronouns&quot;, 
+        col=(c(&quot;blue&quot;,&quot;red&quot; )))
+
+
+#calculating means, min and max values and quartals
+summary(mine_G$TTR) #adjusted for relevant data</code></pre>
+<p>#Bibliography packages</p>
+<pre><code>## [1] &quot;R version 4.4.2 (2024-10-31 ucrt)&quot;</code></pre>
+<pre><code>## To cite R in publications use:
+## 
+##   R Core Team (2024). _R: A Language and Environment for Statistical
+##   Computing_. R Foundation for Statistical Computing, Vienna, Austria.
+##   &lt;https://www.R-project.org/&gt;.
+## 
+## Ein BibTeX-Eintrag für LaTeX-Benutzer ist
+## 
+##   @Manual{,
+##     title = {R: A Language and Environment for Statistical Computing},
+##     author = {{R Core Team}},
+##     organization = {R Foundation for Statistical Computing},
+##     address = {Vienna, Austria},
+##     year = {2024},
+##     url = {https://www.R-project.org/},
+##   }
+## 
+## We have invested a lot of time and effort in creating R, please cite it
+## when using it for data analysis. See also &#39;citation(&quot;pkgname&quot;)&#39; for
+## citing R packages.</code></pre>
+<pre><code>## R version 4.4.2 (2024-10-31 ucrt)
+## Platform: x86_64-w64-mingw32/x64
+## Running under: Windows 11 x64 (build 26100)
+## 
+## Matrix products: default
+## 
+## 
+## locale:
+## [1] LC_COLLATE=German_Germany.utf8  LC_CTYPE=German_Germany.utf8   
+## [3] LC_MONETARY=German_Germany.utf8 LC_NUMERIC=C                   
+## [5] LC_TIME=German_Germany.utf8    
+## 
+## time zone: Europe/Berlin
+## tzcode source: internal
+## 
+## attached base packages:
+## [1] stats     graphics  grDevices utils     datasets  methods   base     
+## 
+## loaded via a namespace (and not attached):
+##  [1] digest_0.6.37     R6_2.5.1          fastmap_1.2.0     xfun_0.49        
+##  [5] cachem_1.1.0      knitr_1.49        htmltools_0.5.8.1 rmarkdown_2.29   
+##  [9] lifecycle_1.0.4   cli_3.6.3         sass_0.4.9        jquerylib_0.1.4  
+## [13] compiler_4.4.2    rstudioapi_0.17.1 tools_4.4.2       evaluate_1.0.1   
+## [17] bslib_0.8.0       yaml_2.3.10       rlang_1.1.4       jsonlite_2.0.0</code></pre>
+</div>
 </div>
 </div>
 
