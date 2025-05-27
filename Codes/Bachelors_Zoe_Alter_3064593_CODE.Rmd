@@ -1,0 +1,1477 @@
+---
+title: "Code BA: AI Got a Feeling"
+author: "Zoe Alter"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+#output: html_document
+output: 
+   html_document:
+     toc: true
+     toc_float: true
+     code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## AI Got a Feeling: Identifying the Writing Style of AI-Generated Reviews using Stylometric Analysis
+
+This R Markdown document was created to accompany the bachelors thesis "AI Got a Feeling: Identifying the Writing Style of AI-Generated Reviews using Stylometric Analysis". This document covers all code applied in the thesis and describes how exactly the different features were elicited and results investigated.
+
+All created data can be found on Github:
+https://github.com/zoalt100/BA-AI-got-a-feeling
+
+### Step one: data collection
+
+#### Part of speech tagging
+
+```{POS}
+library(readr)
+library(tokenizers)
+library(udpipe)
+library(dplyr)
+
+# loading pretrained model updipe for POS tagging
+ud_model <- udpipe_load_model("C:/~/Codes/english-ewt-ud-2.5-191206.udpipe")
+
+#folder path for data
+folder_path <- "C:/~/Data/1 Data cleaned"
+file_list <- list.files(folder_path, pattern = "*.txt", full.names = TRUE)
+
+# output folder for results
+output_folder <- "C:/~/Data/POS"
+dir.create(output_folder, showWarnings = FALSE)
+
+# funciton to elicit POS from every data entry in folder
+process_file <- function(file_path, ud_model) {
+  #read data
+  text <- read_file(file_path)
+  
+  # tokenize text
+  sentences <- tokenize_sentences(text)
+  tokens <- unlist(tokenize_words(text))
+  
+  # POS-Tagging
+  annotation <- udpipe_annotate(ud_model, x = text)
+  annotation <- as.data.frame(annotation)
+  
+  # replace words with pos tags
+  tagged_text <- annotation %>%
+    mutate(token = upos) %>%
+    pull(token) %>%
+    paste(collapse = " ")
+  
+  return(tagged_text)
+}
+
+#loop
+for (file in file_list) {
+  file_name <- tools::file_path_sans_ext(basename(file))
+  tagged_text <- process_file(file, ud_model)
+  
+  # save results
+  output_file <- paste0(output_folder, file_name, "_pos_tagged_text.txt")
+  write_file(tagged_text, output_file)
+  
+  print(paste("results saved in:", output_file))
+}
+
+
+```
+
+#### Ratio of content words
+
+```{Ratio to content words}
+library(readr)
+library(dplyr)
+library(stringr)
+
+# Paths
+input_folder <- "C:/~/Data/POS"
+output_folder <- "C:/~/Data/features/Ratio"
+
+# creating the function
+process_file <- function(file_path, output_folder) {
+  # read texts
+  text <- read_file(file_path)
+  
+  # splitting into the different POS
+  pos_tags <- str_split(text, "\\s+")[[1]]
+  
+  # identify content words (Noun, adjective, verb, adverb)
+  content_words_tags <- c("NOUN", "ADJ", "VERB", "ADV")
+  
+  # sum of all content words
+  total_content_words <- sum(pos_tags %in% content_words_tags)
+  
+  # calculate ratios
+  ratio_con_adverbs <- sum(pos_tags == "ADV") / total_content_words
+  ratio_con_pronouns <- sum(pos_tags == "PRON") / total_content_words
+  ratio_con_determiners <- sum(pos_tags == "DET") / total_content_words
+  ratio_con_subconjunctions <- sum(pos_tags == "SCONJ") / total_content_words
+  ratio_con_coconjunctions <- sum(pos_tags == "CCONJ") / total_content_words
+  conjunctions <- sum(pos_tags == "SCONJ") + sum(pos_tags == "CCONJ")
+  ratio_con_conjunctions <- conjunctions / total_content_words
+  
+  # save results
+  results <- data.frame(
+    ratio_adverbs = ratio_con_adverbs,
+    ratio_pronouns = ratio_con_pronouns,
+    ratio_determiners = ratio_con_determiners,
+    ratio_conjunctions = ratio_con_conjunctions,
+    ratio_subconjunctions = ratio_con_subconjunctions,
+    ratio_coconjunctions = ratio_con_coconjunctions
+  )
+  
+  # name results
+  output_file_name <- paste0(output_folder, "/", tools::file_path_sans_ext(basename(file_path)), "_ratios_results.csv")
+  
+  write_csv(results, output_file_name)
+  
+  print(paste("Ergebnisse für Datei gespeichert:", basename(file_path)))
+}
+
+#create list of all relevant files
+file_list <- list.files(input_folder, pattern = "*.txt", full.names = TRUE)
+
+#loop
+for (file in file_list) {
+  process_file(file, output_folder)
+}
+
+
+
+```
+
+#### Function word frequency
+
+```{Function word}
+
+library(tidyverse)
+
+# Function to calculate function words frequency
+calculate_function_words_frequency <- function(pos_tags) {
+  # Define function word tags
+  function_word_tags <- c("PRON", "DET", "CONJ", "ADP", "AUX", "PART", "INTJ")
+  
+  # sum of words
+  total_words <- length(pos_tags)
+  
+  # Calculate frequency of function words
+  function_words_freq <- pos_tags %>%
+    tibble(tag = .) %>%
+    filter(tag %in% function_word_tags) %>%
+    count(tag, name = "count") %>%
+    mutate(Relative_Frequency = count / total_words) %>%
+    select(-count) %>%
+    pivot_wider(
+      names_from = tag, 
+      values_from = Relative_Frequency, 
+      values_fill = 0
+    )
+  
+  # Calculate overall function words frequency
+  overall_frequency <- sum(pos_tags %in% function_word_tags) / total_words
+  function_words_freq$OVERALL <- overall_frequency
+  
+  function_words_freq
+}
+
+# Main processing function
+process_pos_files <- function(input_dir, output_dir) {
+  # Create output directory if it doesn't exist
+  dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
+  
+  # Find all POS tag files
+  pos_files <- list.files(input_dir, pattern = "\\.txt$", full.names = TRUE)
+  
+  # Process each file
+  for (file_path in pos_files) {
+    # Read POS tags
+    pos_tags <- read_file(file_path) %>%
+      str_split("\\s+") %>%
+      unlist()
+    
+    # Calculate frequencies
+    freq_results <- calculate_function_words_frequency(pos_tags)
+    
+    # Generate output filename
+    output_filename <- file.path(
+      output_dir, 
+      paste0(tools::file_path_sans_ext(basename(file_path)), "_function_words_frequency.csv")
+    )
+    
+    # Write results
+    write_csv(freq_results, output_filename)
+    
+    cat("Processed:", basename(file_path), "\n")
+  }
+}
+
+# Set directories
+input_dir <- "C:/~/POS"
+output_dir <- "C:/~/Data/features/func freq"
+
+# Run the analysis
+process_pos_files(input_dir, output_dir)
+
+```
+
+#### Type-Token-Ratio
+
+```{TTR}
+library(readr)
+library(stringr)
+
+# Paths
+input_folder <- "C:/~/Data/1 Data cleaned" 
+output_folder <- "C:/~/Data/features/TTR"
+
+#function to calculate TTR
+calculate_ttr <- function(text) {
+  words <- unlist(str_split(text, "\\s+"))
+  ttr <- length(unique(words)) / length(words)
+  return(ttr)
+}
+
+# function to process each file
+process_file <- function(file_path, output_folder) {
+  text <- read_file(file_path)
+  
+  #calculate
+  ttr <- calculate_ttr(text)
+  
+  # print results
+  cat("Type-Token Ratio (TTR) für Datei", basename(file_path), ":", ttr, "\n")
+  
+  # save results
+  results <- data.frame(
+    file_name = basename(file_path),
+    ttr = ttr
+  )
+  
+  output_file_name <- paste0(output_folder, "/", tools::file_path_sans_ext(basename(file_path)), "_ttr_results.csv")
+  
+  write_csv(results, output_file_name)
+  
+  print(paste("Ergebnisse für Datei gespeichert:", basename(file_path)))
+}
+
+# create list of relevant data
+file_list <- list.files(input_folder, pattern = "*.txt", full.names = TRUE)
+
+# loop
+for (file in file_list) {
+  process_file(file, output_folder)
+}
+
+```
+
+#### Lengths
+
+```{lengths}
+library(readr)
+library(stringr)
+library(dplyr)
+
+# paths
+input_folder <- "C:/~/Data/1 Data cleaned"
+output_folder <- "C:/~/Data/features/lengths"
+
+# function to calculate average words and sentence length
+calculate_lengths <- function(text) {
+  # splitting sentences with "!,?, and ."
+  sentences <- unlist(strsplit(text, "(?<=[.!?])\\s*", perl = TRUE))
+  
+  # calculating average sentence length
+  sentence_lengths_without_spaces <- sapply(sentences, function(sentence) nchar(gsub("\\s", "", sentence)))
+  avg_sentence_length_without_spaces <- mean(sentence_lengths_without_spaces)
+  
+  #splitting words
+  words <- unlist(str_split(text, "\\s+"))
+  
+  # calculating average word length
+  word_lengths_with_spaces <- sapply(words, nchar)
+  avg_word_length_with_spaces <- mean(word_lengths_with_spaces)
+  
+  # calculating average words per sentence
+  words_per_sentence <- sapply(sentences, function(sentence) length(unlist(str_split(sentence, "\\s+"))))
+  avg_words_per_sentence <- mean(words_per_sentence)
+  
+  return(data.frame(
+    avg_sentence_length_without_spaces = avg_sentence_length_without_spaces,
+    avg_word_length_with_spaces = avg_word_length_with_spaces,
+    avg_words_per_sentence = avg_words_per_sentence
+  ))
+}
+
+# function for loop
+process_file <- function(file_path, output_folder) {
+  text <- read_file(file_path)
+  
+  # calculating
+  lengths <- calculate_lengths(text)
+  
+  # save
+  output_file_name <- paste0(output_folder, "/", tools::file_path_sans_ext(basename(file_path)), "_lengths_results.csv")
+  write_csv(lengths, output_file_name)
+  
+  print(paste("Ergebnisse für Datei gespeichert:", basename(file_path)))
+}
+
+#list of all relevant entries
+file_list <- list.files(input_folder, pattern = "*.txt", full.names = TRUE)
+
+# loop
+for (file in file_list) {
+  process_file(file, output_folder)
+}
+
+```
+
+#### Frequency
+
+```{freq}
+library(readr)
+library(dplyr)
+library(stringr)
+
+#top 100 entries include sentence markers, which were manually deleted from the corpus. 
+
+#paths
+file_path <- "C:/~/Data/eng_news_2023_10K/eng_news_2023_10K-words.txt" #path to wordlist
+input_folder_texts <- "C:/~Data/1 Data cleaned"
+output_folder <- "C:/~/Data/features/freqs"
+
+# creating output folder
+if (!dir.exists(output_folder)) {
+  dir.create(output_folder, recursive = TRUE)
+}
+
+#read relevant part of wordlist
+word_list <- read_delim(file_path, delim = "\t", col_names = FALSE)[[2]]
+
+# split wordlist into categories
+first_10 <- word_list[1:10]
+first_100 <- word_list[1:100]
+first_1000 <- word_list[1:1000]
+further <- word_list[1001:length(word_list)]
+
+# save results
+cat("First 10 words:", first_10, "\n")
+cat("First 100 words:", first_100, "\n")
+cat("First 1000 words:", first_1000, "\n")
+cat("Further words:", further, "\n")
+
+# create funtion for frequency
+process_file <- function(file_path, wordlists, output_folder) {
+  #reading text
+  text <- read_file(file_path)
+  
+  #splitting text
+  words <- unlist(str_split(text, "\\s+"))
+  
+  #count w´which words in wordlist
+  count_in_first_10 <- sum(words %in% wordlists$first_10)
+  count_in_first_100 <- sum(words %in% wordlists$first_100)
+  count_in_first_1000 <- sum(words %in% wordlists$first_1000)
+  count_in_further <- sum(words %in% wordlists$further)
+  
+  total_words <- length(words)
+  
+  # calculate ratios
+  ratio_in_first_10 <- count_in_first_10 / total_words
+  ratio_in_first_100 <- count_in_first_100 / total_words
+  ratio_in_first_1000 <- count_in_first_1000 / total_words
+  ratio_in_further <- count_in_further / total_words
+  
+  # save reuslts in df
+  results <- data.frame(
+    file_name = basename(file_path),
+    ratio_in_first_10 = ratio_in_first_10,
+    ratio_in_first_100 = ratio_in_first_100,
+    ratio_in_first_1000 = ratio_in_first_1000,
+    ratio_in_further = ratio_in_further
+  )
+  
+  # save results
+  output_file_name <- paste0(output_folder, "/", tools::file_path_sans_ext(basename(file_path)), "_wordlist_comparison.csv")
+  write_csv(results, output_file_name)
+  
+  print(paste("Ergebnisse für Datei gespeichert:", basename(file_path)))
+}
+
+# create list of relevant data
+text_files <- list.files(input_folder_texts, pattern = "*.txt", full.names = TRUE)
+
+# loop
+for (file in text_files) {
+  process_file(file, list(first_10 = first_10, first_100 = first_100, first_1000 = first_1000, further = further), output_folder)
+}
+
+
+```
+
+#### Dependency trees
+
+```{Dependency trees}
+library(spacyr)
+library(dplyr)
+library(readr)
+
+# paths
+input_folder <- "C:/~/Data/1 Data cleaned"  
+output_folder <- "C:/U~/Data/features/dependency trees"
+
+#initialize spaCy
+spacy_initialize(model = "en_core_web_sm")
+
+#creating function for dependency trees
+
+process_file <- function(file_path, output_folder) {
+  texts <- read_file(file_path)
+  
+  #homogenize different sentence markers
+  texts <- gsub("'", "’", texts)
+  texts <- gsub('"', "", texts)
+  
+  # splitting sentences with "!,? and ."
+  sentences <- unlist(strsplit(texts, "(?<=[.!?])\\s*", perl = TRUE))
+  
+  #cleaning sentences
+  sentences <- trimws(sentences)
+  
+  # create df
+  all_parsed_sentences <- data.frame()
+  distances_summary <- data.frame()
+  
+  # Apply parsing to data for each sentence in data entry
+  for (i in seq_along(sentences)) {
+    parsed_sentence <- spacy_parse(sentences[i], tag = TRUE, dependency = TRUE)
+    
+    # add coloumn for sentence indes
+    parsed_sentence$sentence_index <- i
+    
+    # Calculating distance to root token
+    distances <- numeric(nrow(parsed_sentence))
+    for (j in seq_len(nrow(parsed_sentence))) {
+      token_id <- j
+      distance <- 0
+      while (token_id > 0 && parsed_sentence$dep_rel[token_id] != "ROOT") {
+        head_id <- parsed_sentence$head_token_id[token_id]
+        token_id <- which(parsed_sentence$token_id == head_id)
+        distance <- distance + 1
+        if (length(token_id) == 0 || is.na(head_id)) {
+          break
+        }
+      }
+      distances[j] <- distance
+    }
+    
+    # calculate average and max distance
+    max_distance <- max(distances)
+    avg_distance <- mean(distances)
+    
+    # save result
+    distances_summary <- rbind(distances_summary, data.frame(sentence_index = i, max_distance = max_distance, avg_distance = avg_distance))
+    
+    # add to df
+  
+    all_parsed_sentences <- bind_rows(all_parsed_sentences, parsed_sentence)
+  }
+  
+  #Calculating max and average for entire data entry
+  longest_distance <- max(distances_summary$max_distance)
+  average_distance_all <- mean(distances_summary$avg_distance)
+  
+  #create dataframe
+  overall_summary <- data.frame(
+    file_name = basename(file_path),
+    longest_distance = longest_distance,
+    average_distance_all = average_distance_all
+  )
+  
+  #SAve result for each data entry
+  output_file_name <- paste0(output_folder, "/", tools::file_path_sans_ext(basename(file_path)), "_overall_summary.csv")
+  write_csv(overall_summary, output_file_name)
+  
+  print(paste("Ergebnisse für Datei gespeichert:", basename(file_path)))
+}
+
+# create list of relevant files
+file_list <- list.files(input_folder, pattern = "*.txt", full.names = TRUE)
+
+# loop!
+for (file in file_list) {
+  process_file(file, output_folder)
+}
+
+```
+
+#### CEFR
+
+```{CEFR}
+library(readr)
+library(dplyr)
+library(tidyverse)
+library(stringr)
+library(tokenizers)
+library(SnowballC)
+library(textstem)
+
+# loading cefr data
+cefrj <- read_csv("C:/~/Data/Wordlists/cefrj-vocabulary-profile-1.5.csv")
+cefrj_c <- read_csv("C:/~/Data/Wordlists/octanove-vocabulary-profile-c1c2-1.0.csv")
+cefrj <- bind_rows(cefrj, cefrj_c)
+
+#delete duplicates 
+cefrj <- cefrj %>% distinct()
+
+# paths
+folder_path <- "C:/~/Data/1 Data cleaned"
+file_list <- list.files(folder_path, pattern = "*.txt", full.names = TRUE)
+
+#function to assign cerf values
+process_file <- function(file_path, cefrj) {
+  text <- read_file(file_path)
+  
+  #tokenize
+  tokens <- data.frame(word = unlist(tokenize_words(text)), pos = NA)
+  
+  #  elicit given POS data and apply
+  assign_pos <- function(word, cefrj) {
+    match <- cefrj %>% filter(headword == word) %>% select(pos)
+    if (nrow(match) == 1) {
+      return(match$pos[1])
+    } else {
+      return(NA)
+    }
+  }
+  
+  # assign POS to tokenized words
+  tokens$pos <- sapply(tokens$word, assign_pos, cefrj)
+  
+  #stemm and lemmatize words
+  tokens_stem <- tokens %>%
+    mutate(stem = wordStem(word, language = "en"))
+  
+  tokens_lemma <- tokens %>%
+    mutate(lemma = lemmatize_words(word))
+  
+  # calculate sum of wordss in each level
+  cefr_levels <- c("A1", "A2", "B1", "B2", "C1", "C2")
+  cefr_counts <- data.frame(matrix(ncol = length(cefr_levels), nrow = 0))
+  colnames(cefr_counts) <- cefr_levels
+  
+  for (level in cefr_levels) {
+    level_words <- cefrj %>%
+      filter(CEFR == level) %>%
+      select(headword, pos) 
+    
+    stem_count <- sum(tokens_stem$stem %in% level_words$headword & tokens_stem$pos %in% level_words$pos)
+    lemma_count <- sum(tokens_lemma$lemma %in% level_words$headword & tokens_lemma$pos %in% level_words$pos)
+    
+    cefr_counts[1, level] <- stem_count + lemma_count
+  }
+  
+  # calculate total words
+  total_words <- nrow(tokens)
+  
+  #calculating ratios for each level
+  cefr_ratios <- cefr_counts / total_words
+  
+  return(cefr_ratios)
+}
+
+# lop for relevant data 
+for (file in file_list) {
+  file_name <- tools::file_path_sans_ext(basename(file))
+  cefr_ratios <- process_file(file, cefrj)
+  
+  # save data
+  output_file <- paste0(folder_path, file_name, "_cefr_level_results.csv")
+  write_csv(cefr_ratios, output_file)
+  
+  print(paste("Ergebnisse gespeichert in:", output_file))
+}
+
+```
+
+#### Sentiment and formality
+
+```{sent + form}
+library(syuzhet)
+library(readr)
+library(dplyr)
+
+#paths
+input_folder <- "C:/~/Data/1 Data cleaned"
+output_folder <- "C:/~Data/features/sentiment"
+
+#function to calculate sentiment and formality
+process_file <- function(file_path, output_folder) {
+  texts <- read_lines(file_path)
+  
+  # Sentiment analyses with syuzhet package
+  sentiment_scores <- get_nrc_sentiment(texts)
+  
+  # Extract sentences and words
+  sentences <- get_sentences(texts)
+  words <- unlist(strsplit(sentences, "\\s+"))
+  
+  # Elicit words and assigned emotions
+  word_emotions <- lapply(words, function(word) {
+    score <- get_nrc_sentiment(word)
+    if (sum(score) > 0) {
+      return(data.frame(
+        word = word,
+        joy = score$joy,
+        trust = score$trust,
+        fear = score$fear,
+        surprise = score$surprise,
+        sadness = score$sadness,
+        disgust = score$disgust,
+        anger = score$anger,
+        anticipation = score$anticipation
+      ))
+    } else {
+      return(NULL)
+    }
+  })
+  
+  # eliminate NULL values
+  word_emotions <- Filter(Negate(is.null), word_emotions)
+  
+  # create df
+  word_emotions_df <- do.call(rbind, word_emotions)
+  
+  # Save data
+  output_file_name <- paste0(output_folder, "/", tools::file_path_sans_ext(basename(file_path)), "_words_emotions_mapping.csv")
+  write.csv(word_emotions_df, output_file_name, row.names = FALSE)
+  
+  #calculate formality
+  evaluate_formality <- function(text) {
+    words <- strsplit(text, "\\s+")[[1]]
+    num_words <- length(words)
+    
+    #calculate formality scores
+    filler_words <- c("um", "uh", "like", "you know", "well")
+    filler_count <- sum(words %in% filler_words)
+    
+    formality_score <- ((num_words - filler_count) / num_words)
+    return(formality_score)
+  }
+  
+  formality_scores <- sapply(texts, evaluate_formality)
+  
+  #create df and save
+  results <- data.frame(
+    sentiment = sentiment_scores$positive - sentiment_scores$negative, 
+    formality = formality_scores
+  )
+  
+  output_results_file <- paste0(output_folder, "/", tools::file_path_sans_ext(basename(file_path)), "_results.csv")
+  write.csv(results, output_results_file, row.names = FALSE)
+  
+  print(paste("Ergebnisse für Datei gespeichert:", basename(file_path)))
+}
+
+# list all relevant data
+file_list <- list.files(input_folder, pattern = "*.txt", full.names = TRUE)
+
+# loop
+for (file in file_list) {
+  process_file(file, output_folder)
+}
+
+```
+
+### Step two: creating the dataset
+
+#### Summarize results
+
+```{Summarize dataset}
+library(tidyverse)
+library(readr)
+
+#path
+base_dir <- "C:/~/Data/features"
+
+# functionto summarize all gathered results
+process_multiple_datasets <- function(base_directory) {
+  # Liste aller Ordner erhalten
+  folders <- list.dirs(path = base_directory, full.names = TRUE, recursive = FALSE)
+  
+  # create datalist
+  all_folder_data <- list()
+  
+  # number of relevant rows
+  standard_rows <- 120 #adjust for relevant data
+  
+  # loop through each folder
+  for (i in seq_along(folders)) {
+    # locate relevant csv
+    files <- list.files(folders[i], pattern = "\\.csv$", full.names = TRUE)
+    
+    # read each line in each data entry
+    folder_files_data <- lapply(files, function(file) {
+      data <- read_csv(file, show_col_types = FALSE)
+      return(data)
+    })
+    
+    # combine data
+    combined_folder_data <- bind_rows(folder_files_data)
+    
+    # truncate and fill missing data
+    if (nrow(combined_folder_data) > standard_rows) {
+      combined_folder_data <- combined_folder_data[1:standard_rows, ]
+    } else if (nrow(combined_folder_data) < standard_rows) {
+      combined_folder_data <- bind_rows(combined_folder_data, 
+                                        as.data.frame(matrix(NA, ncol = ncol(combined_folder_data), 
+                                                             nrow = standard_rows - nrow(combined_folder_data))))
+    }
+    
+    # save and create list
+    all_folder_data[[basename(folders[i])]] <- combined_folder_data
+  }
+  
+  # create df
+  result_df <- do.call(cbind, all_folder_data)
+  
+  return(result_df)
+}
+
+# run function
+processed_dataset <- process_multiple_datasets(base_dir)
+
+# save results as csv
+write_csv(processed_dataset, "last_test_DATENSATZ.csv")
+
+# print csv
+view(processed_dataset)
+```
+
+#### Clean results
+
+```{cleaning data}
+library(dplyr)
+library(readr)
+library(writexl)
+
+# Function to delete unwanted cloumns and add relevant ones
+delete_columns <- function(input_file, output_file, columns_to_delete) {
+  # Read the CSV file
+  data <- read_csv(input_file, show_col_types = FALSE)
+  
+  # Remove specified columns and add new ones
+  data_cleaned <- data %>% 
+    select(-all_of(columns_to_delete)) %>%
+    mutate(
+      author = case_when(
+        row_number() <= ceiling(n()/3) ~ "GPT",
+        row_number() <= 2 * ceiling(n()/3) ~ "Llama",
+        TRUE ~ "Mistral"
+      )
+    ) %>%
+    mutate(
+      dummy = case_when(
+        author == "GPT" ~ 1,
+        author == "Llama" ~ 2,
+        author == "Mistral" ~ 3
+      )
+    ) 
+  #checked manually that no false attribution to author happened
+  
+  # Write the modified data to a new CSV file
+  write_csv(data_cleaned, output_file)
+  
+  
+  # Print summary for error checks
+  cat("Columns deleted:", paste(columns_to_delete, collapse = ", "), "\n")
+  cat("Original columns:", ncol(data), "\n")
+  cat("Remaining columns:", ncol(data_cleaned), "\n")
+  cat("Distribution of authors:\n")
+  print(table(data_cleaned$author))
+  cat("\nDummy variable distribution:\n")
+  print(table(data_cleaned$dummy))
+}
+
+#paths
+input_path <- "C:/~/Data/DATENSATZ.csv"
+output_path <- "C:/~/Data/DATENSATZ_cleaned.csv" 
+
+#select columns to remove
+columns_to_remove <- c("freq.file_name", "TTR.file_name", "Dependency trees.file_name") #deleted all files and irrelevant columns
+
+# Run the function
+delete_columns(input_path, output_path, columns_to_remove)
+
+view(data_cleaned)
+
+```
+
+#### Delete outliers (failed)
+
+```{delete outliers}
+library(readr)
+library(dplyr)
+
+# Read the data
+data <- read_csv("C:/~/Data/DATENSATZ_cleaned.csv", 
+                 show_col_types = FALSE)
+
+# Create a copy of the original data
+clean_data <- data
+
+# Columns to check for outliers
+columns_to_check <- c("CERF.A1", "TTR.ttr", "Ratios.ratio_pronouns", "Ratios.ratio_coconjunctions") #apply to relevant columns
+
+# Function to identify outliers using IQR method
+identify_outliers <- function(x) {
+  Q1 <- quantile(x, 0.25, na.rm = TRUE)
+  Q3 <- quantile(x, 0.75, na.rm = TRUE)
+  IQR_val <- IQR(x, na.rm = TRUE)
+  
+  # Return logical vector where TRUE indicates an outlier
+  x < (Q1 - 1.5 * IQR_val) | x > (Q3 + 1.5 * IQR_val)
+}
+
+# Create a vector to track which rows to keep
+rows_to_keep <- rep(TRUE, nrow(data))
+
+# Loop through each column to check for outliers
+for (col in columns_to_check) {
+  # Skip if column doesn't exist
+  if (!(col %in% colnames(data))) {
+    cat("Column", col, "not found in the dataset. Skipping.\n")
+    next
+  }
+  
+  # Identify outliers in the current column
+  outliers_in_col <- identify_outliers(data[[col]])
+  
+  # Count and print number of outliers found
+  num_outliers <- sum(outliers_in_col, na.rm = TRUE)
+  cat("Found", num_outliers, "outliers in column", col, "\n")
+  
+  # Update rows_to_keep to exclude these outliers
+  rows_to_keep <- rows_to_keep & !outliers_in_col
+}
+
+# Create new dataset without outliers
+clean_data <- data[rows_to_keep, ]
+
+# Print summary
+cat("Original dataset had", nrow(data), "rows\n")
+cat("After removing outliers,", nrow(clean_data), "rows remain\n")
+cat("Removed", nrow(data) - nrow(clean_data), "rows in total\n")
+
+# Save the cleaned data to a new CSV file
+write_csv(clean_data, "Subtask_noout.csv")
+cat("Cleaned data saved to 'Subtask_noout.csv'\n")
+getwd()
+
+```
+
+#### Standardize data and split into test, dev and train set
+
+```{standardizer}
+library(caTools)
+library(dplyr)
+library(readr)
+library(tidyverse)
+library(caret) 
+
+# read data
+data_raw <- read_csv("C:/~/Data/DATENSATZ_cleaned.csv", 
+                 show_col_types = FALSE)
+
+#delete dummy
+data<- data_raw %>%  select(-dummy)
+
+#set random seed
+set.seed(111)
+
+# Split 1: Train (70%) vs. Dev + Test (30%)
+train_index <- createDataPartition(data$author, p = 0.7, list = FALSE)
+train_set <- data[train_index, ]
+rest_set <- data[-train_index, ]
+
+# Split 2: Dev (10%) vs. Test (20%) based on rest
+dev_index <- createDataPartition(rest_set$author, p = 1/3, list = FALSE)  
+dev_set <- rest_set[dev_index, ]
+test_set <- rest_set[-dev_index, ]
+
+#writing new sets
+write.csv(train_set, "C:/~/Data/1train_raw.csv", row.names = FALSE)
+write.csv(dev_set, "C:/~/Data/1dev_raw.csv", row.names = FALSE)
+write.csv(test_set, "C:/~/Data/1test_raw.csv", row.names = FALSE)
+  
+# function for standarization
+standardize_data <- function(data, mean_vals, sd_vals) {
+  # initialize data
+  standardized_data <- data
+  
+  # Iidentify numercials (excluding author)
+  numeric_cols <- sapply(data, is.numeric)
+  
+  # loop through each column
+  for (col_name in names(data)) {
+    if (numeric_cols[col_name]) {
+      #apply standrization
+      standardized_values <- (data[[col_name]] - mean_vals[[col_name]]) / sd_vals[[col_name]]
+      
+      # verify number of rows
+      if (length(standardized_values) == nrow(data)) {
+        standardized_data[[col_name]] <- standardized_values
+      } else {
+        stop(paste("Die Anzahl der Zeilen stimmt nicht überein für Spalte:", col_name))
+      }
+    }
+  }
+  
+  # return standarized data
+  return(standardized_data)
+}
+
+# calculate mean and sd for training set
+mean_vals <- sapply(train_set, function(x) if(is.numeric(x)) mean(x, na.rm = TRUE) else NA)
+sd_vals <- sapply(train_set, function(x) if(is.numeric(x)) sd(x, na.rm = TRUE) else NA)
+
+# standarize and save training set
+train_standardized <- standardize_data(train_set, mean_vals, sd_vals)
+print(train_standardized)
+write.csv(train_standardized, "C:/~/Data/1train_standardized.csv", row.names = FALSE)
+
+# Standardize and save dev set (using values from training set)
+dev_standardized <- standardize_data(dev_set, mean_vals, sd_vals)
+write.csv(dev_standardized, "C:/~/Data/1DEV_standardized.csv", row.names = FALSE)
+
+# Standardize and save test sert(using values from training set)
+test_standardized <- standardize_data(test_set, mean_vals, sd_vals)
+write.csv(test_standardized, "C:/~/Data/1test_standardized.csv", row.names = FALSE)
+
+```
+
+### Step three: model creation
+
+#### Best AIC
+
+```{AIC}
+library(nnet)  
+library(dplyr)
+library(tidyr)
+library(readr)
+
+#data
+data <- read_csv("C:/~/Data/1train_standardized.csv", 
+                 show_col_types = FALSE)
+
+# author as factor
+train <- data %>%
+  mutate(author = as.factor(author))
+
+#predictores for AIC
+
+predictors <- c(
+  "CERF.A1" ,                                  
+  "CERF.A2" ,                                 
+  "CERF.B1" ,                                   
+  "CERF.B2" ,                                  
+  "CERF.C1" ,                                  
+  "CERF.C2" ,
+  "Dependency trees.longest_distance" ,
+  "Dependency trees.average_distance_all",
+  "freq.ratio_in_first_10",
+  "freq.ratio_in_first_100",
+  "freq.ratio_in_first_1000",
+  "freq.ratio_in_further",
+  "lengths.avg_sentence_length_without_spaces",
+  "lengths.avg_word_length_with_spaces",
+  "lengths.avg_words_per_sentence",
+  "Ratios.ratio_adverbs", 
+  "Ratios.ratio_pronouns",
+  "Ratios.ratio_determiners",
+  "Ratios.ratio_conjunctions",
+  "Ratios.ratio_subconjunctions",
+  "Ratios.ratio_coconjunctions",
+"relfreq func.ADP",
+"relfreq func.AUX",
+"relfreq func.PART",
+"relfreq func.OVERALL",
+  "sentiment.sentiment",
+  "sentiment.formality",
+  "TTR.ttr")
+
+#create function to find best models
+perform_model <- function(formula, data) {
+  model <- tryCatch({
+    multinom(as.formula(formula), data = train)
+  }, error = function(e) {
+    return(NULL)
+  })
+  
+  if (is.null(model)) {
+    return(NULL)
+  }
+  
+  if (any(is.na(coef(model)))) {
+    return(NULL)
+  }
+  
+  return(model)
+}
+
+#create combinations for comparison
+combinations <- lapply(6, function(m) combn(predictors, m, simplify = FALSE)) 
+#adjust size of possible combinations
+combinations <- unlist(combinations, recursive = FALSE)
+
+#check all ccombinations created
+aic_results <- lapply(combinations, function(comb) {
+  formula <- paste("author~", paste(comb, collapse = " + "))
+  model <- perform_model(formula, train)
+  if (is.null(model)) {
+    return(NULL)
+  }
+  return(list(formula = formula, aic = AIC(model)))
+})
+
+# delete NULL
+aic_results <- aic_results[!sapply(aic_results, is.null)]
+
+# give out top 5 models
+top_models <- aic_results[order(sapply(aic_results, function(res) res$aic), decreasing = FALSE)][1:5]
+
+
+# results
+print("Top 5 delle:")
+for (i in seq_along(top_models)) {
+  cat(sprintf("\nModell #%d:\n", i))
+  print(top_models[[i]]$formula)
+  print(paste("aic:", round(top_models[[i]]$aic, 5))
+}
+
+
+
+```
+
+#### Closed ACC
+
+```{Accuracy}
+library(nnet)  
+library(dplyr)
+library(tidyr)
+library(readr)
+library(caret)
+
+# data
+data <- read_csv("C:/~/Data/1train_standardized.csv", 
+                 show_col_types = FALSE)
+
+# author as factor
+train <- data %>%  mutate(author = as.factor(author))
+
+#select variables depending on top 5 models 
+predictors <- c(
+  "CERF.A1" ,                                  
+  #"CERF.A2" ,                                 
+  #"CERF.B1" ,                                   
+  #"CERF.B2" ,                                  
+  #"CERF.C1" ,                                  
+  "CERF.C2" ,
+  #"Dependency trees.longest_distance" ,
+  #"Dependency trees.average_distance_all",
+  #"freq.ratio_in_first_10",
+  #"freq.ratio_in_first_100",
+  #"freq.ratio_in_first_1000",
+  #"freq.ratio_in_further",
+  #"lengths.avg_sentence_length_without_spaces",
+  #"lengths.avg_word_length_with_spaces",
+  #"lengths.avg_words_per_sentence",
+  #"Ratios.ratio_adverbs", 
+  "Ratios.ratio_pronouns",
+  #"Ratios.ratio_determiners",
+  #"Ratios.ratio_conjunctions",
+  #"Ratios.ratio_subconjunctions",
+  "Ratios.ratio_coconjunctions",
+  #"relfreq func.ADP",
+  #"relfreq func.AUX",
+  #"relfreq func.PART",
+  #"relfreq func.OVERALL",
+  #"sentiment.sentiment",
+  #"sentiment.formality",
+  "TTR.ttr")
+
+#function for accuracy
+perform_model <- function(formula, train, DEV) {
+  # Modell trainieren
+  model <- tryCatch({
+    multinom(as.formula(formula), data = train)
+  }, error = function(e) {
+    return(NULL)
+  })
+  
+  if (is.null(model)) {
+    return(NULL)
+  }
+  
+  # prediction on dev set
+  predictions <- tryCatch({
+    predict(model, newdata = DEV)
+  }, error = function(e) {
+    return(NULL)
+  })
+  
+  if (is.null(predictions)) {
+    return(NULL)
+  }
+  
+  # calculate accuracy
+  conf_matrix <- confusionMatrix(predictions, DEV$author)
+  accuracy <- conf_matrix$overall["Accuracy"]
+  
+  return(list(formula = formula, accuracy = accuracy))
+}
+
+#generate combination, apply needed size
+combinations <- lapply(2, function(m) combn(predictors, m, simplify = FALSE))
+combinations <- unlist(combinations, recursive = FALSE)
+
+# read dev data
+DEV_data <- read_csv("C:/~/Data/1DEV_standardized.csv", 
+                     show_col_types = FALSE)
+#author as factor
+DEV <- DEV_data %>%
+  mutate(author = as.factor(author))
+
+# appply on dev set
+accuracy_results <- lapply(combinations, function(comb) {
+  formula <- paste("author ~", paste(comb, collapse = " + "))
+  perform_model(formula, train, DEV)
+})
+
+# delete null
+accuracy_results <- accuracy_results[!sapply(accuracy_results, is.null)]
+
+#create top 3 accuracy models
+top_models <- accuracy_results[order(sapply(accuracy_results, function(res) res$accuracy), decreasing = TRUE)][1:3]
+
+# show results
+print("Top 3 Modelle:")
+for (i in seq_along(top_models)) {
+  cat(sprintf("\nModell #%d:\n", i))
+  print(top_models[[i]]$formula)
+  print(paste("Accuracy:", round(top_models[[i]]$accuracy, 4)))
+}
+
+
+```
+
+#### Multinomial logistic regression on training data
+
+```{Mlr on train}
+library(stargazer)
+library(dplyr)
+library(readr)
+library(nnet)
+library(ggplot2)
+library(reshape2)
+
+# data
+data <- read_csv("C:/~/Data/1train_standardized.csv", 
+                 show_col_types = FALSE)
+
+DEV_data <- read_csv("C:/~/Data/1DEV_standardized.csv", 
+                            show_col_types = FALSE)
+
+# author as factor
+train <- data %>%
+  mutate(author = as.factor(author))
+
+DEV <- DEV_data %>%
+  mutate(author = as.factor(author))
+
+
+#top three models (first aic, then acc)
+model0 <- multinom(author~ CERF.A1 + CERF.C2 + Ratios.ratio_pronouns + Ratios.ratio_coconjunctions + TTR.ttr, 
+                   data = train)
+
+model1 <- multinom (author ~ CERF.A1 + Ratios.ratio_pronouns + Ratios.ratio_coconjunctions + TTR.ttr,
+                    data = train)
+
+model2 <- multinom (author ~ CERF.A1 + TTR.ttr,
+                    data = train)
+
+
+# visualization
+#function to extract acc
+extract_accuracy <- function(model, DEV_data) {
+  predictions <- predict(model, DEV_data)
+  conf_matrix <- confusionMatrix(predictions, DEV_data$author)
+  return(conf_matrix$overall['Accuracy'])
+}
+
+# accuracy
+accuracy_model0 <- extract_accuracy(model0, DEV)
+accuracy_model1 <- extract_accuracy(model1, DEV)
+accuracy_model2 <- extract_accuracy(model2, DEV)
+
+# visualizing with stargazer
+stargazer(model0, model1, model2,  type = "text",
+          title = "Final Multinomialen Logistic Regression",
+          add.lines=list(c("Accuracy", 
+            round(accuracy_model0,2), round(accuracy_model0,2), 
+            round(accuracy_model1,2), round(accuracy_model1,2),
+            round(accuracy_model2,2), round(accuracy_model2,2))),
+          out = "multinomial_regression_prediction_models.html")
+
+```
+
+#### Calculating risk ratios
+
+```{rr}
+library(stargazer)
+library(nnet)
+library(ggplot2)
+library(reshape2)
+
+#seperating models
+modela <- multinom (author ~ CERF.A1,
+                    data = train)
+modelb <- multinom (author ~ Ratios.ratio_pronouns,
+                     data = train)
+modelc <- multinom (author ~ Ratios.ratio_coconjunctions,
+                     data = train)
+modeld <- multinom (author ~ TTR.ttr, data = train)
+
+#get rr
+Cexpa <- exp(coef(modela))
+Cexpb <- exp(coef(modelb))
+Cexpc <- exp(coef(modelc))
+Cexpd <- exp(coef(modeld))
+
+#visualize
+stargazer(
+  modela, modelb, modelc, modeld,
+  type = "text", 
+  coef = list(Cexpa, Cexpb, Cexpc, Cexpd),
+  p.auto = FALSE, 
+  out = "riskratios.html"
+
+```
+
+#### Spearmans and Pearsons Correlation
+
+```{spearmans}
+library(ggplot2)
+library(reshape2)
+# only features in final model
+predictors <- c("CERF.A1" ,                                  
+  "Ratios.ratio_pronouns",
+  "Ratios.ratio_coconjunctions",
+ "TTR.ttr"
+)
+
+
+# calculate spearmans for all combinations
+correlation_matrix <- cor(train[predictors], 
+                          method = "spearman") #replaced with "pearson" for person correlation
+
+# identify correlations
+high_correlations <- which(abs(correlation_matrix) > 0.1 & 
+                             abs(correlation_matrix) < 1, arr.ind = TRUE)
+if(nrow(high_correlations) > 0) {
+  for(i in 1:nrow(high_correlations)) {
+    if(high_correlations[i, 1] < high_correlations[i, 2]) {
+      var1 <- rownames(correlation_matrix)[high_correlations[i, 1]]
+      var2 <- colnames(correlation_matrix)[high_correlations[i, 2]]
+      corr_value <- correlation_matrix[high_correlations[i, 1], 
+                                       high_correlations[i, 2]]
+      print(sprintf("%s - %s: %.3f", var1, var2, corr_value))
+    }
+  }
+}
+
+
+# format for heatmap
+melted_corr_matrix <- melt(correlation_matrix)
+
+# visualize
+ggplot(data = melted_corr_matrix, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1, 1), space = "Lab", 
+                       name = "Spearman\nRanking") +
+  theme_minimal() + 
+  labs(title = "Heatmap Spearmans Ranking") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                   size = 12, hjust = 1)) +
+  geom_text(aes(label = round(value, 2)), color = "black", size = 4)
+
+```
+
+#### Testing the model on dev and test set
+
+```{test}
+library(caret)
+library(dplyr)
+library(readr)
+
+# data
+DEV_data <- read_csv("C:/~/Data/1DEV_standardized.csv", 
+                            show_col_types = FALSE)
+# Daten einlesen
+test_data <- read_csv("C:/~/Data/1test_standardized.csv", 
+                     show_col_types = FALSE)
+
+
+# author as factor
+DEV <- DEV_data %>%
+  mutate(author = as.factor(author))
+test <- test_data %>%
+  mutate(author = as.factor(author))
+
+
+# generate predictions
+predictions <- predict(model1, DEV) #exchange dev for test set in final attempt
+
+# create confusion matrix
+conf_matrix <- confusionMatrix(predictions, DEV$author) #also exchange
+
+print(conf_matrix)
+
+
+# visualize
+library(ggplot2)
+
+# Create a named vector for the mapping
+new_labels <- c("1" = "ChatGPT", "2" = "LLama", "3" = "Mistral")
+
+conf_data <- as.data.frame(conf_matrix$table)
+
+# Convert Reference and Prediction to factors with new labels
+conf_data$Reference <- factor(conf_data$Reference)
+conf_data$Prediction <- factor(conf_data$Prediction)
+
+ggplot(conf_data, aes(Prediction, Reference, fill=Freq)) +
+  geom_tile() +
+  scale_fill_gradient(low="white", high="blue") +
+  theme_minimal() +
+  labs(title="Confusion Matrix Multinomial Regression")
+
+```
+
+#### Decisiontree
+
+```{tree}
+
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(dplyr)
+library(readr)
+
+#Daten einlesen
+data <- read_csv("C:/~/Data/1train_standardized.csv", 
+                 show_col_types = FALSE)
+
+data_DEV <- read_csv("C:/~/1DEV_standardized.csv",
+                      show_col_types = FALSE)
+
+#as factor
+data_model <- data %>%
+  mutate(author = as.factor(author))
+data_DEV_check <- data_DEV %>%
+  mutate(author = as.factor(author))
+
+
+# Tree Model 
+tree_model <- rpart(author~ CERF.A1 + CERF.C2 + Ratios.ratio_pronouns + Ratios.ratio_coconjunctions + TTR.ttr,
+                    data = data_model,
+                    method = "class")
+
+# Visualisierung
+rpart.plot(tree_model)
+
+
+
+# quality of the model
+predictions_tree <- predict(tree_model, data_DEV_check, type = "class")
+conf_matrix_tree <- confusionMatrix(predictions_tree, data_DEV_check$author)
+print(conf_matrix_tree)
+
+
+# visualize
+library(ggplot2)
+
+# Create a named vector for the mapping
+new_labels <- c("1" = "ChatGPT", "2" = "LLama", "3" = "Mistral")
+
+conf_data <- as.data.frame(conf_matrix_tree$table)
+
+# Convert Reference and Prediction to factors with new labels
+conf_data$Reference <- factor(conf_data$Reference, 
+                              levels = c("1", "2", "3"),
+                              labels = c("ChatGPT", "LLama", "Mistral"))
+conf_data$Prediction <- factor(conf_data$Prediction,
+                               levels = c("1", "2", "3"),
+                               labels = c("ChatGPT", "LLama", "Mistral"))
+
+ggplot(conf_data, aes(Prediction, Reference, fill=Freq)) +
+  geom_tile() +
+  scale_fill_gradient(low="white", high="blue") +
+  theme_minimal() +
+  labs(title="Confusion Matrix Visualization")
+
+```
+
+### Step four: SemEval
+
+Step one and two were repeated (only adapted for a .jsonl input, instead of a.txt file), and then retrained on a train set and applied to a test set, as in step three.
+
+### Step five: Profiling
+
+#### Creating the profiles
+
+```{profiling}
+#data
+sem <- read.csv("~/Data/Semeval/SUBtrain1_cleaned.csv")
+mine <- read.csv("C:/U~/Data/DATENSATZ_cleaned.csv")
+
+#creation of boxplots for profiles, data input and feature changed based on need
+boxplot(sem$CERF.A1~sem$author,
+        xlab = "Author", ylab = "CEFR A1", 
+        col=(c("gray", "lightgreen","blue","lightblue","red", "orange"  )))
+        
+#comparing the datasets
+#data
+sem <- read.csv("C:/~/Data/Semeval/SUBtrain1_raw.csv")
+
+mine <- read.csv("C:/~/Data/DATENSATZ_cleaned.csv")
+
+# add source
+Sem_G <- df[sem$author == "GPT", ] %>%
+  mutate(Source = "SemEval")
+
+mine_G <- df[mine$author == "GPT", ] %>%
+  mutate(Source = "Curated")
+  
+combined_data <- bind_rows(Sem_G, mine_G)
+
+#creating boxplot, compare needed data
+boxplot(combined_data$Ratios.ratio_pronouns~combined_data$Source,
+        xlab = "Corpus", ylab = "Pronouns", 
+        col=(c("blue","red" )))
+
+
+#calculating means, min and max values and quartals
+summary(mine_G$TTR) #adjusted for relevant data
+```
+
+### Session info
+
+```{r echo=FALSE}
+sessionInfo()
+
+```
